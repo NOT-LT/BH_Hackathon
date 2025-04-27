@@ -1,25 +1,26 @@
-import express from 'express';
-import { OpenAI } from 'openai';
-import { config } from 'dotenv';
-import fetch from 'node-fetch'; // Important for embedding
-import fs from 'fs';
-import { readFile, writeFile } from 'fs/promises';
-import path from 'path';
-import multer from 'multer';
+import express from "express";
+import { OpenAI } from "openai";
+import { config } from "dotenv";
+import fetch from "node-fetch"; // Important for embedding
+import fs from "fs";
+import { readFile, writeFile } from "fs/promises";
+import path from "path";
+import multer from "multer";
+import EmailRoutes from "./EmailRoutes.js";
 
-const EMBEDDINGS_FILE = './embeddings.json';
+const EMBEDDINGS_FILE = "./embeddings.json";
 async function saveEmbeddings(embeddings) {
-  await writeFile(EMBEDDINGS_FILE, JSON.stringify(embeddings), 'utf8');
-  console.log('Saved embeddings to file.');
+  await writeFile(EMBEDDINGS_FILE, JSON.stringify(embeddings), "utf8");
+  console.log("Saved embeddings to file.");
 }
 
-const upload = multer({ dest: 'uploads/' });
+const upload = multer({ dest: "uploads/" });
 
 async function loadEmbeddings() {
   if (fs.existsSync(EMBEDDINGS_FILE)) {
-      const data = await readFile(EMBEDDINGS_FILE, 'utf8');
-      console.log('Loaded embeddings from file.');
-      return JSON.parse(data);
+    const data = await readFile(EMBEDDINGS_FILE, "utf8");
+    console.log("Loaded embeddings from file.");
+    return JSON.parse(data);
   }
   return null;
 }
@@ -32,30 +33,33 @@ app.use(express.json());
 
 // --- OpenAI setup ---
 const openai = new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY,
+  apiKey: process.env.OPENAI_API_KEY,
 });
-
+const apiRouter = express.Router();
 // --- In-memory storage ---
 let uaChunks = [];
 let uaEmbeddings = [];
 
 // --- Cosine similarity function ---
 function cosineSimilarity(vecA, vecB) {
-    const dotProduct = vecA.reduce((acc, val, i) => acc + val * vecB[i], 0);
-    const normA = Math.sqrt(vecA.reduce((acc, val) => acc + val * val, 0));
-    const normB = Math.sqrt(vecB.reduce((acc, val) => acc + val * val, 0));
-    return dotProduct / (normA * normB);
+  const dotProduct = vecA.reduce((acc, val, i) => acc + val * vecB[i], 0);
+  const normA = Math.sqrt(vecA.reduce((acc, val) => acc + val * val, 0));
+  const normB = Math.sqrt(vecB.reduce((acc, val) => acc + val * val, 0));
+  return dotProduct / (normA * normB);
 }
 
 // --- Load and embed UA content ---
 async function loadUAContent() {
-  const text = await readFile('./ua_cleaned_v2.txt', 'utf8');
-  const words = text.split(' ');
+  const text = await readFile("./ua_cleaned_v2.txt", "utf8");
+  const words = text.split(" ");
   const chunkSize = 300;
 
   for (let i = 0; i < words.length; i += chunkSize) {
-      const chunk = words.slice(i, i + chunkSize).join(' ').trim();
-      uaChunks.push(chunk);
+    const chunk = words
+      .slice(i, i + chunkSize)
+      .join(" ")
+      .trim();
+    uaChunks.push(chunk);
   }
 
   console.log(`Loaded ${uaChunks.length} chunks.`);
@@ -63,62 +67,65 @@ async function loadUAContent() {
   // Check if embeddings already saved
   const savedEmbeddings = await loadEmbeddings();
   if (savedEmbeddings) {
-      uaEmbeddings = savedEmbeddings;
-      return;
+    uaEmbeddings = savedEmbeddings;
+    return;
   }
 
-  console.log('Now creating embeddings...');
+  console.log("Now creating embeddings...");
 
   for (const chunk of uaChunks) {
-      const embeddingResponse = await openai.embeddings.create({
-          model: 'text-embedding-ada-002',
-          input: chunk,
-      });
-      uaEmbeddings.push(embeddingResponse.data[0].embedding);
+    const embeddingResponse = await openai.embeddings.create({
+      model: "text-embedding-ada-002",
+      input: chunk,
+    });
+    uaEmbeddings.push(embeddingResponse.data[0].embedding);
   }
 
   await saveEmbeddings(uaEmbeddings);
-  console.log('Generated and saved embeddings.');
+  console.log("Generated and saved embeddings.");
 }
-
 
 // --- Find best matches based on embeddings ---
 async function findRelevantChunks(question) {
-    const embeddingResponse = await openai.embeddings.create({
-        model: 'text-embedding-ada-002',
-        input: question,
-    });
-    const questionEmbedding = embeddingResponse.data[0].embedding;
+  const embeddingResponse = await openai.embeddings.create({
+    model: "text-embedding-ada-002",
+    input: question,
+  });
+  const questionEmbedding = embeddingResponse.data[0].embedding;
 
-    // Calculate cosine similarity for each chunk
-    const similarities = uaEmbeddings.map(chunkEmbedding => cosineSimilarity(chunkEmbedding, questionEmbedding));
+  // Calculate cosine similarity for each chunk
+  const similarities = uaEmbeddings.map((chunkEmbedding) =>
+    cosineSimilarity(chunkEmbedding, questionEmbedding)
+  );
 
-    // Sort by similarity descending
-    const topIndices = similarities
-        .map((sim, idx) => ({ sim, idx }))
-        .sort((a, b) => b.sim - a.sim)
-        .slice(0, 3) // Top 3 most similar
-        .map(obj => obj.idx);
+  // Sort by similarity descending
+  const topIndices = similarities
+    .map((sim, idx) => ({ sim, idx }))
+    .sort((a, b) => b.sim - a.sim)
+    .slice(0, 3) // Top 3 most similar
+    .map((obj) => obj.idx);
 
-    return topIndices.map(idx => uaChunks[idx]);
+  return topIndices.map((idx) => uaChunks[idx]);
 }
 
 // --- Routes ---
-app.get('/', (req, res) => {
-    res.send('Welcome to the UA Chatbot API! Use POST /ask to ask questions.');
+app.get("/", (req, res) => {
+  res.send("Welcome to the UA Chatbot API! Use POST /ask to ask questions.");
 });
 
-app.post('/ask', async (req, res) => {3
-    const { question } = req.body;
-    if (!question) return res.status(400).json({ error: 'No question provided.' });
+app.post("/ask", async (req, res) => {
+  3;
+  const { question } = req.body;
+  if (!question)
+    return res.status(400).json({ error: "No question provided." });
 
-    try {
-        const relevantChunks = await findRelevantChunks(question);
-        const prompt = `Answer in Arabic Language.
+  try {
+    const relevantChunks = await findRelevantChunks(question);
+    const prompt = `Answer in Arabic Language.
 You are a Universal Acceptance (UA) expert and you use the latest IDN standard called IDNA2008 for IDNs.
 Answer primarly based on the information provided. If the context does not contain enough information to answer, use your own knowledge."
 Context:
-${relevantChunks.join('\n\n')}
+${relevantChunks.join("\n\n")}
 
 Question:
 ${question}
@@ -126,18 +133,18 @@ ${question}
 Answer:
         `;
 
-        const completion = await openai.chat.completions.create({
-            model: 'gpt-4o',
-            temperature: 0.2, // Lower for more factual answers
-            messages: [{ role: 'user', content: prompt }],
-        });
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4o",
+      temperature: 0.2, // Lower for more factual answers
+      messages: [{ role: "user", content: prompt }],
+    });
 
-        const answer = completion.choices[0].message.content.trim();
-        res.json({ answer });
-    } catch (error) {
-        console.error(error);
-        res.status(500).json({ error: 'Failed to process request.' });
-    }
+    const answer = completion.choices[0].message.content.trim();
+    res.json({ answer });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Failed to process request." });
+  }
 });
 
 // --- File upload route ---
@@ -182,39 +189,38 @@ ${codeText}
 `;
 
   const completion = await openai.chat.completions.create({
-      model: 'gpt-4o',
-      temperature: 0.2,
-      messages: [{ role: 'user', content: prompt }],
+    model: "gpt-4o",
+    temperature: 0.2,
+    messages: [{ role: "user", content: prompt }],
   });
 
   const answer = completion.choices[0].message.content.trim();
   return answer;
 }
 
-
 // --- POST /upload (upload multiple files) ---
-app.post('/upload', upload.array('files'), (req, res) => {
-  res.json({ message: 'Files uploaded successfully.' });
+app.post("/upload", upload.array("files"), (req, res) => {
+  res.json({ message: "Files uploaded successfully." });
 });
 
 // --- GET /analyze (analyze uploaded files) ---
-app.get('/analyze', async (req, res) => {
+app.get("/analyze", async (req, res) => {
   try {
-      const files = await readdir('./uploads');
-      const reports = [];
+    const files = await readdir("./uploads");
+    const reports = [];
 
-      for (const file of files) {
-          const filePath = path.join('./uploads', file);
-          const content = await readFile(filePath, 'utf8');
+    for (const file of files) {
+      const filePath = path.join("./uploads", file);
+      const content = await readFile(filePath, "utf8");
 
-          const report = await analyzeCode(content);
-          reports.push({ file, report });
-      }
+      const report = await analyzeCode(content);
+      reports.push({ file, report });
+    }
 
-      res.json({ results: reports });
+    res.json({ results: reports });
   } catch (error) {
-      console.error(error);
-      res.status(500).json({ error: 'Failed to analyze uploaded files.' });
+    console.error(error);
+    res.status(500).json({ error: "Failed to analyze uploaded files." });
   }
 });
 
@@ -224,11 +230,13 @@ function findRelevantChunks2(code) {
   const codeLower = code.toLowerCase();
 
   // Find chunks that include at least part of the code text
-  const matches = trainingChunks.filter(chunk => chunk.toLowerCase().includes(codeLower));
+  const matches = trainingChunks.filter((chunk) =>
+    chunk.toLowerCase().includes(codeLower)
+  );
 
   // If matches found, return top 3 matches
   if (matches.length > 0) {
-      return matches.slice(0, 3);
+    return matches.slice(0, 3);
   }
 
   // If no matches found, fallback to first two chunks
@@ -236,26 +244,24 @@ function findRelevantChunks2(code) {
 }
 
 // --- POST /analyze-text (analyze code sent as text) ---
-app.post('/analyze-text', async (req, res) => {
-  const { code, language = 'arabic' } = req.body; // default language is Arabic
+app.post("/analyze-text", async (req, res) => {
+  const { code, language = "arabic" } = req.body; // default language is Arabic
 
   if (!code) {
-      return res.status(400).json({ error: 'No code text provided.' });
+    return res.status(400).json({ error: "No code text provided." });
   }
 
   try {
     const relevantChunks = findRelevantChunks2(code);
 
     if (relevantChunks.length === 0) {
-        relevantChunks.push(...trainingChunks.slice(0, 2));
+      relevantChunks.push(...trainingChunks.slice(0, 2));
     }
-    
-  
 
-      // Build the language-specific instruction
-      let instruction;
-      if (language.toLowerCase() === 'arabic') {
-          instruction = `
+    // Build the language-specific instruction
+    let instruction;
+    if (language.toLowerCase() === "arabic") {
+      instruction = `
 أنت خبير في فحص الأكواد وفق معايير التوافق الشامل (Universal Acceptance - UA) ومعايير IDNA2008.
 
 حلل الكود التالي وحدد:
@@ -283,8 +289,8 @@ app.post('/analyze-text', async (req, res) => {
 
 إذا لم تجد مشكلة، اذكر ذلك بوضوح.
 `;
-      } else {
-          instruction = `
+    } else {
+      instruction = `
 You are a Universal Acceptance (UA) code review expert following IDNA2008 standards.
 
 Analyze the following code snippet and provide:
@@ -312,13 +318,13 @@ Overall Comment:
 
 If no problems are found, mention that clearly.
 `;
-      }
+    }
 
-      const prompt = `
+    const prompt = `
 ${instruction}
 
 Context:
-${relevantChunks.join('\n\n')}
+${relevantChunks.join("\n\n")}
 
 Code Snippet:
 \`\`\`
@@ -326,24 +332,26 @@ ${code}
 \`\`\`
       `;
 
-      const completion = await openai.chat.completions.create({
-          model: 'gpt-4o',
-          temperature: 0.2,
-          messages: [{ role: 'user', content: prompt }],
-      });
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4o",
+      temperature: 0.2,
+      messages: [{ role: "user", content: prompt }],
+    });
 
-      const report = completion.choices[0].message.content.trim();
-      res.json({ report });
+    const report = completion.choices[0].message.content.trim();
+    res.json({ report });
   } catch (error) {
-      console.error(error);
-      res.status(500).json({ error: 'Failed to analyze code text.' });
+    console.error(error);
+    res.status(500).json({ error: "Failed to analyze code text." });
   }
 });
 
-
+apiRouter.use("/", EmailRoutes); // This will handle /api/sendEmail
+// Mount the apiRouter under /api
+app.use("/api", apiRouter);
 // --- Start server ---
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, async () => {
-    await loadUAContent();
-    console.log(`Server running at http://localhost:${PORT}`);
+  await loadUAContent();
+  console.log(`Server running at http://localhost:${PORT}`);
 });
