@@ -353,7 +353,9 @@ apiRouter.use("/", EmailRoutes); // This will handle /api/sendEmail
 app.use("/api", apiRouter);
 // --- Start server ---
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, async () => {
+app.listen(PORT, "0.0.0.0", async () => {
   await loadUAContent();
-  console.log(`Server running at http://localhost:${PORT}`);
+  console.log(
+    `Server running at http://${process.env.HOST || "your-server-ip"}:${PORT}`
+  );
 });

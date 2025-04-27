@@ -34,6 +34,7 @@ const Login = mongoose.model("Login", loginSchema);
 
 const userSchema = new mongoose.Schema({
   email: { type: String, required: true, unique: true },
+  fullname: { type: String },
   createdAt: { type: Date, default: Date.now },
 });
 
@@ -48,6 +49,33 @@ const transporter = nodemailer.createTransport({
   },
   tls: { rejectUnauthorized: false },
 });
+
+// Requires a punycode conversion function for IDN domains.
+// (In Node.js, you can use require('punycode').toASCII; in browsers, use an IDN library.)
+function linkify(text) {
+  // Trim the input to remove leading/trailing whitespace
+  const input = text.trim();
+
+  // Simple regex patterns (using Unicode escapes) for email vs domain
+  const emailPattern =
+    /^([\p{L}\p{N}._%+-]+)@([\p{L}\p{N}-]+(?:\.[\p{L}\p{N}-]+)+)$/u;
+  const domainPattern = /^([\p{L}\p{N}-]+(?:\.[\p{L}\p{N}-]+)+)$/u;
+
+  let match;
+  if ((match = input.match(emailPattern))) {
+    let [, localPart, domainPart] = match;
+    // Convert the domain part of the email to ASCII (punycode) if needed
+    const asciiDomain = toASCII(domainPart); // assume toASCII converts Unicode domain -> punycode
+    return `mailto:${localPart}@${asciiDomain}`;
+  } else if ((match = input.match(domainPattern))) {
+    let domain = match[1];
+    const asciiDomain = toASCII(domain);
+    return `http://${asciiDomain}`;
+  } else {
+    // No link found or input is not a valid single domain/email
+    return null;
+  }
+}
 
 function isAsciiEmail(email) {
   return /^[\x00-\x7F]+@[\x00-\x7F]+\.[\x00-\x7F]+$/.test(email);
@@ -66,6 +94,40 @@ function validateEmail(email) {
     }
   }
 }
+router.post("/linkify", (req, res) => {
+  const { text } = req.body;
+
+  if (!text) return res.status(400).json({ error: "Text is required" });
+
+  const input = text.trim();
+
+  // Email pattern: local-part@domain
+  const emailPattern =
+    /^([\p{L}\p{N}._%+-]+)@([\p{L}\p{N}-]+(?:\.[\p{L}\p{N}-]+)+)$/u;
+  // Domain pattern: domain (must have at least one dot)
+  const domainPattern = /^([\p{L}\p{N}-]+(?:\.[\p{L}\p{N}-]+)+)$/u;
+
+  let match;
+  try {
+    if ((match = input.match(emailPattern))) {
+      const localPart = match[1];
+      const domainPart = match[2];
+      const asciiDomain = toAscii(domainPart);
+      return res.json({ link: `mailto:${localPart}@${asciiDomain}` });
+    } else if ((match = input.match(domainPattern))) {
+      const domain = match[1];
+      const asciiDomain = toAscii(domain);
+      return res.json({ link: `http://${asciiDomain}` });
+    } else {
+      return res
+        .status(400)
+        .json({ error: "Input must be a valid domain or email" });
+    }
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+});
 
 router.post("/validate-email", (req, res) => {
   const { email } = req.body;
