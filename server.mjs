@@ -3,11 +3,22 @@ import { OpenAI } from 'openai';
 import { config } from 'dotenv';
 import fetch from 'node-fetch'; // Important for embedding
 import fs from 'fs';
-import { readFile, writeFile } from 'fs/promises';
+import { readFile, writeFile, stat } from 'fs/promises';
 import path from 'path';
 import multer from 'multer';
 import cors from 'cors';
 import EmailRoutes from "./EmailRoutes.js";
+import mammoth from 'mammoth';
+import pdfPoppler from 'pdf-poppler';
+import mime from 'mime-types'; // install it if needed: npm install mime-types
+import { createRequire } from 'module';
+import { Console } from 'console';
+import bidi from 'bidi-js'; // Install this library: npm install bidi-js
+import Tesseract from 'tesseract.js'; // Install it: npm install tesseract.js
+const require = createRequire(import.meta.url);
+const PDFParser = require('pdf2json');
+import pdf from 'pdf-parse';
+import { detectOne } from 'langdetect';
 
 const EMBEDDINGS_FILE = "./embeddings.json";
 async function saveEmbeddings(embeddings) {
@@ -15,7 +26,7 @@ async function saveEmbeddings(embeddings) {
   console.log("Saved embeddings to file.");
 }
 
-const upload = multer({ dest: "uploads/" });
+const upload = multer({ dest: 'uploads/' }); // uploads/ folder in your project
 
 async function loadEmbeddings() {
   if (fs.existsSync(EMBEDDINGS_FILE)) {
@@ -28,10 +39,27 @@ async function loadEmbeddings() {
 
 config();
 globalThis.fetch = fetch; // Needed because openai uses fetch
-
+const languageMap = {
+  en: 'English',
+  ar: 'Arabic',
+  fr: 'French',
+  es: 'Spanish',
+  de: 'German',
+  zh: 'Chinese',
+  ru: 'Russian',
+  ja: 'Japanese',
+  it: 'Italian',
+  pt: 'Portuguese',
+  hi: 'Hindi',
+  // Add more if needed!
+};
 const app = express();
 app.use(express.json());
 app.use(cors());
+let uploadedChunks = [];
+let uploadedEmbeddings = [];
+
+let uploadedPrompt = ""; // Global variable to store the uploaded document's content
 
 // --- OpenAI setup ---
 const openai = new OpenAI({
@@ -115,29 +143,101 @@ app.get("/", (req, res) => {
   res.send("Welcome to the UA Chatbot API! Use POST /ask to ask questions.");
 });
 
+async function detectLanguageName(text) {
+  const langCode = detectOne(text);
+  if (!langCode) {
+    return 'Unknown';
+  }
+  
+  const langName = languageMap[langCode] || 'Unknown'; // fallback if code not mapped
+  return langName;
+}
+
 app.post("/ask", async (req, res) => {
-  3;
-  const { question } = req.body;
-  if (!question)
-    return res.status(400).json({ error: "No question provided." });
+  const { question, chatHistory = '' } = req.body;
+  const chatHistoryString = `[${chatHistory
+    .map(entry => `User: ${entry.UserInput}\nGlobalLink: ${entry.GlobalLink}`)
+    .join('\n\n')}]`;
+
+
+  console.log("chatHistory", chatHistoryString);
+  let userLanguage = 'Arabic'; // Default fallback language
+  detectLanguageName(question).then(lang => {
+    userLanguage = lang;
+  });
+  if (userLanguage !== 'English' && userLanguage !== 'Arabic') {
+    userLanguage = 'English'; // Default to Arabic if not English or Arabic
+  }
+  if (userLanguage === 'Unknown') {
+    userLanguage = 'Arabic'
+  }
+  if (!question) return res.status(400).json({ error: "No question provided." });
 
   try {
     const relevantChunks = await findRelevantChunks(question);
-    const prompt = `Answer in Arabic Language.
-You are a Universal Acceptance (UA) expert and you use the latest IDN standard called IDNA2008 for IDNs.
-Answer primarly based on the information provided. If the context does not contain enough information to answer, use your own knowledge."
-Context:
-${relevantChunks.join("\n\n")}
+    let relevantUploadedChunks = [];
 
-Question:
+    // Use uploaded content if available
+    if (uploadedChunks.length > 0) {
+      const embeddingResponse = await openai.embeddings.create({
+        model: "text-embedding-ada-002",
+        input: question,
+      });
+      const questionEmbedding = embeddingResponse.data[0].embedding;
+
+      const similarities = uploadedEmbeddings.map(embedding =>
+        cosineSimilarity(embedding, questionEmbedding)
+      );
+
+      const topIndices = similarities
+        .map((sim, idx) => ({ sim, idx }))
+        .sort((a, b) => b.sim - a.sim)
+        .slice(0, 3)
+        .map(obj => obj.idx);
+
+      relevantUploadedChunks = topIndices.map(idx => uploadedChunks[idx]);
+      // relevantChunks = relevantChunks.concat(relevantUploadedChunks);
+      // Clear uploaded content after use
+      uploadedChunks = [];
+      uploadedEmbeddings = [];
+    }
+
+    // Combine relevant chunks
+    const context = relevantChunks.join("\n\n");
+
+    // Build the prompt
+    //     You are a Universal Acceptance (UA) expert and you follow the latest IDN standard called IDNA2008 for Internationalized Domain Names (IDNs).
+    const prompt = `
+Your name is GlobalLink.
+
+Respond in ${userLanguage}.
+
+Answer concisely to the User Input.
+Use the provided Context and Conversation History as your primary sources.
+Treat the Conversation History as a memory of previous exchanges with the user.
+If the user asks about previous messages, refer to the Conversation History to answer.
+
+If the context and conversation history do not contain enough information, supplement your answer carefully with your own knowledge.
+Be clear, accurate, and concise.
+
+User Input:
 ${question}
 
-Answer:
-        `;
+Conversation History:
+${chatHistoryString}
 
+Context:
+${context}
+
+Answer:
+`;
+
+
+
+    // Send the prompt to OpenAI
     const completion = await openai.chat.completions.create({
       model: "gpt-4o",
-      temperature: 0.2, // Lower for more factual answers
+      temperature: 0.2,
       messages: [{ role: "user", content: prompt }],
     });
 
@@ -351,6 +451,286 @@ ${code}
 apiRouter.use("/", EmailRoutes); // This will handle /api/sendEmail
 // Mount the apiRouter under /api
 app.use("/api", apiRouter);
+
+
+//
+// --- Route to upload document ---
+app.post("/upload-doc-chat", upload.single("file"), async (req, res) => {
+  try {
+    const file = req.file;
+    if (!file) return res.status(400).json({ error: "No file uploaded." });
+    console.log("Uploaded:", file.path);
+
+    // Clear previous uploaded content
+    uploadedChunks = [];
+    uploadedEmbeddings = [];
+
+    let text = "";
+
+    // Determine the file type and extract text accordingly
+    const mimetype = file.mimetype;
+    if (mimetype === "application/pdf") {
+      text = await extractTextFromPDF(file.path);
+    } else if (
+      mimetype === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
+      mimetype === "application/msword"
+    ) {
+      const data = await readFile(file.path);
+      const result = await mammoth.extractRawText({ buffer: data });
+      text = result.value;
+    } else if (mimetype === "text/plain") {
+      text = await readFile(file.path, "utf8");
+    } else {
+      return res.status(400).json({ error: "Unsupported file type. Please upload PDF, DOC, DOCX, or TXT files." });
+    }
+
+    // Split text into chunks and generate embeddings
+    const words = text.split(" ");
+    const chunkSize = 300;
+
+    for (let i = 0; i < words.length; i += chunkSize) {
+      const chunk = words.slice(i, i + chunkSize).join(" ").trim();
+      uploadedChunks.push(chunk);
+
+      const embeddingResponse = await openai.embeddings.create({
+        model: "text-embedding-ada-002",
+        input: chunk,
+      });
+      uploadedEmbeddings.push(embeddingResponse.data[0].embedding);
+    }
+
+    res.json({ message: "Document uploaded and processed successfully." });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Failed to process document." });
+  }
+});
+
+// --- Route to chat with uploaded document ---
+app.post("/ask-doc-chat", async (req, res) => {
+  const { question } = req.body;
+  if (!question) return res.status(400).json({ error: "No question provided." });
+
+  if (uploadedChunks.length === 0 || uploadedEmbeddings.length === 0) {
+    return res.status(400).json({ error: "No document uploaded yet." });
+  }
+
+  try {
+    const embeddingResponse = await openai.embeddings.create({
+      model: "text-embedding-ada-002",
+      input: question,
+    });
+    const questionEmbedding = embeddingResponse.data[0].embedding;
+
+    const similarities = uploadedEmbeddings.map(embedding =>
+      cosineSimilarity(embedding, questionEmbedding)
+    );
+
+    const topIndices = similarities
+      .map((sim, idx) => ({ sim, idx }))
+      .sort((a, b) => b.sim - a.sim)
+      .slice(0, 3)
+      .map(obj => obj.idx);
+
+    const relevantChunks = topIndices.map(idx => uploadedChunks[idx]);
+
+    const prompt = `
+Answer in the same language of the question.
+
+Context:
+${relevantChunks.join("\n\n")}
+
+Question:
+${question}
+
+Answer:
+    `;
+
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4o",
+      temperature: 0.2,
+      messages: [{ role: "user", content: prompt }],
+    });
+
+    const answer = completion.choices[0].message.content.trim();
+    res.json({ answer });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Failed to generate answer." });
+  }
+});
+
+
+async function extractUploadedText(filePath, mimetype) {
+  const fullPath = path.resolve(filePath);
+  const fileStats = await stat(fullPath);
+
+  if (fileStats.size === 0) {
+    throw new Error('Uploaded file is empty.');
+  }
+
+  if (mimetype === 'application/pdf') {
+    console.log('Extracting text from PDF...');
+    const pdfParser = new PDFParser();
+    return new Promise((resolve, reject) => {
+      pdfParser.on("pdfParser_dataError", errData => {
+        console.error('Error parsing PDF:', errData.parserError);
+        reject(new Error('Failed to parse PDF.'));
+      });
+
+      pdfParser.on("pdfParser_dataReady", async pdfData => {
+        try {
+          if (!pdfData?.formImage?.Pages) {
+            console.warn('PDF has no formImage.Pages structure. Attempting OCR...');
+            const ocrText = await performOCR(fullPath);
+            if (ocrText.trim().length === 0) {
+              reject(new Error('The uploaded PDF does not contain readable text. Please upload a proper PDF.'));
+            } else {
+              resolve(ocrText);
+            }
+            return;
+          }
+
+          const pages = pdfData.formImage.Pages;
+          const pageTexts = pages.map(page => {
+            const texts = page.Texts.map(textItem => {
+              try {
+                const decodedText = decodeURIComponent(textItem.R[0]?.T || '');
+                // Reorder text for Arabic (RTL) using bidi
+                const reorderedText = bidi.fromLogical(decodedText);
+                return reorderedText;
+              } catch (err) {
+                console.error('Error decoding text item:', err.message);
+                return ''; // Fallback to empty string if decoding fails
+              }
+            });
+            return texts.join(' ');
+          });
+
+          const fullText = pageTexts.join('\n\n');
+
+          if (fullText.trim().length < 500) {
+            reject(new Error('The extracted PDF text is too short. Please upload a better quality PDF.'));
+          } else {
+            resolve(fullText);
+          }
+        } catch (err) {
+          console.error('Error processing PDF text:', err.message);
+          reject(new Error('Failed to properly extract PDF content.'));
+        }
+      });
+
+      pdfParser.loadPDF(fullPath);
+    });
+  } else if (mimetype === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
+    const data = await readFile(fullPath);
+    const result = await mammoth.extractRawText({ buffer: data });
+    console.log('Extracted text from DOCX:', result.value);
+    return result.value;
+  } else if (mimetype === 'text/plain') {
+    let data = await readFile(fullPath, 'utf8');
+    console.log('Extracted text from TXT:', data);
+    return data;
+  } else {
+    throw new Error('Unsupported file type. Please upload PDF, DOCX, or TXT.');
+  }
+}
+
+async function performOCR(filePath) {
+  console.log('Performing OCR on scanned PDF...');
+
+  // Step 1: Convert PDF to images
+  const outputDir = path.resolve('./temp_images');
+  if (!fs.existsSync(outputDir)) {
+    fs.mkdirSync(outputDir);
+  }
+
+  const options = {
+    format: 'jpeg', // Output format
+    out_dir: outputDir,
+    out_prefix: path.basename(filePath, path.extname(filePath)),
+    page: null, // Process all pages
+  };
+
+  try {
+    console.log('Converting PDF to images...');
+    await pdfPoppler.convert(filePath, options);
+    console.log('PDF converted to images.');
+
+    // Step 2: Perform OCR on each image
+    const imageFiles = fs.readdirSync(outputDir).filter(file => file.endsWith('.jpeg'));
+    let fullText = '';
+
+    for (const imageFile of imageFiles) {
+      const imagePath = path.join(outputDir, imageFile);
+      console.log(`Processing image: ${imagePath}`);
+
+      const { data: { text } } = await Tesseract.recognize(imagePath, 'eng+ara', {
+        langPath: path.resolve('./tessdata'), // Path to the local tessdata directory
+        logger: info => console.log(info), // Log OCR progress
+      });
+
+      fullText += text + '\n';
+    }
+
+    console.log('OCR extraction complete.');
+    return fullText.trim();
+  } catch (error) {
+    console.error('Error during OCR:', error.message);
+    throw new Error('Failed to extract text using OCR.');
+  } finally {
+    // Clean up temporary images
+    fs.rmSync(outputDir, { recursive: true, force: true }); // Updated to use fs.rmSync
+  }
+}
+
+
+async function extractTextFromPDF(filePath) {
+  const dataBuffer = fs.readFileSync(filePath);
+  const pdfData = await pdf(dataBuffer);
+  return pdfData.text; // Extracted text from the PDF
+}
+
+async function chatWithPDF(filePath, question) {
+  try {
+    // Step 1: Extract text from the PDF
+    const pdfText = await extractTextFromPDF(filePath);
+    console.log('Extracted PDF text:', pdfText);
+    // Step 2: Create a prompt with the extracted text and the user's question
+    const prompt = `
+The following is the content of a PDF document:
+
+${pdfText}
+
+Question:
+${question}
+
+Answer:
+    `;
+
+    // Step 3: Send the prompt to ChatGPT
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4o",
+      temperature: 0.2,
+      messages: [{ role: "user", content: prompt }],
+    });
+
+    const answer = completion.choices[0].message.content.trim();
+    console.log('ChatGPT Answer:', answer);
+    return answer;
+  } catch (error) {
+    console.error('Error:', error.message);
+    throw new Error('Failed to process the PDF or generate a response.');
+  }
+}
+
+// // Example usage
+// chatWithPDF('./GPT_API.pdf', 'What is the main topic of this document?')
+//   .then(answer => console.log('Answer:', answer))
+//   .catch(err => console.error('Error:', err.message));
+
+
+
 // --- Start server ---
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, async () => {
