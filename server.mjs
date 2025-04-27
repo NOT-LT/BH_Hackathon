@@ -6,6 +6,7 @@ import fs from 'fs';
 import { readFile, writeFile } from 'fs/promises';
 import path from 'path';
 import multer from 'multer';
+import cors from 'cors';
 
 const EMBEDDINGS_FILE = './embeddings.json';
 async function saveEmbeddings(embeddings) {
@@ -29,6 +30,7 @@ globalThis.fetch = fetch; // Needed because openai uses fetch
 
 const app = express();
 app.use(express.json());
+app.use(cors());
 
 // --- OpenAI setup ---
 const openai = new OpenAI({
