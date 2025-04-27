@@ -1,9 +1,9 @@
-import express from 'express';
-import cors from 'cors';
-import dotenv from 'dotenv';
-import OpenAI from 'openai';
-import fs from 'fs';
-
+import express from "express";
+import cors from "cors";
+import dotenv from "dotenv";
+import OpenAI from "openai";
+import fs from "fs";
+import EmailRoutes from "./EmailRoutes.js";
 dotenv.config();
 
 const app = express();
@@ -11,15 +11,15 @@ app.use(cors());
 app.use(express.json());
 
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const apiRouter = express.Router();
 
-app.post('/api/chat', async (req, res) => {
+app.post("/api/chat", async (req, res) => {
   const userMessage = req.body.message;
   try {
     const file = await client.files.create({
       file: fs.createReadStream("Starry Night.jpg"),
       purpose: "user_data",
     });
-
 
     const response = await client.responses.create({
       model: "gpt-4o-mini",
@@ -38,29 +38,34 @@ app.post('/api/chat', async (req, res) => {
             A: Fair skies dost bless the heavens, and gentle winds whisper through the morn. A most pleasant day awaiteth thee.
        
             Respond to all future queries in such manner.
-          `
-          },
-          {
-              role: "user",
-              content: [
-                {
-                  "type": "input_text",
-                  "text": userMessage
-                },
-                {
-                  type: "input_image",
-                  file_id: file.id,
-                },
-              ]
-          },
+          `,
+        },
+        {
+          role: "user",
+          content: [
+            {
+              type: "input_text",
+              text: userMessage,
+            },
+            {
+              type: "input_image",
+              file_id: file.id,
+            },
+          ],
+        },
       ],
     });
-    const output = response.output_text
+    const output = response.output_text;
     res.json({ output });
-  }
-  catch (err) {
+  } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
- 
-app.listen(3000, () => console.log('Server running on http://localhost:3000'));
+
+// Connect EmailRoutes
+apiRouter.use("/", EmailRoutes); // This will handle /api/sendEmail
+
+// Mount the apiRouter under /api
+app.use("/api", apiRouter);
+
+app.listen(3000, () => console.log("Server running on http://localhost:3000"));
