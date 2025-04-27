@@ -1,10 +1,30 @@
 import express from "express";
 import nodemailer from "nodemailer";
 import punycode from "punycode";
+import mongoose from "mongoose";
+import dotenv from "dotenv";
+import idna from "idna-uts46";
+const { toAscii, toUnicode } = idna;
+
+dotenv.config();
 
 const router = express.Router();
 
-// إعداد الاتصال بسيرفر SMTP
+mongoose
+  .connect(process.env.MONGO_URI, {
+    useNewUrlParser: true,
+    useUnifiedTopology: true,
+  })
+  .then(() => console.log("MongoDB Connected ✅"))
+  .catch((err) => console.error("MongoDB connection error ❌:", err.message));
+
+const subscriptionSchema = new mongoose.Schema({
+  uLabelEmail: { type: String, required: true },
+  aLabelEmail: { type: String, required: true },
+});
+
+const Subscription = mongoose.model("Subscription", subscriptionSchema);
+
 const transporter = nodemailer.createTransport({
   host: "mail.xn--mgbam8grabl.xn--mgbcpq6gpa1a",
   port: 465,
@@ -13,37 +33,88 @@ const transporter = nodemailer.createTransport({
     user: "Mailbox13",
     pass: "godomains",
   },
-  tls: {
-    rejectUnauthorized: false,
-  },
+  tls: { rejectUnauthorized: false },
 });
 
-router.post("/sendEmail", async (req, res) => {
-  try {
-    const { toEmail } = req.body; // الإيميل اللي يدخل من المستخدم
+function isAsciiEmail(email) {
+  return /^[\x00-\x7F]+@[\x00-\x7F]+\.[\x00-\x7F]+$/.test(email);
+}
 
-    if (!toEmail) {
-      return res.status(400).json({ error: "Email is required" });
+function validateEmail(email) {
+  if (isAsciiEmail(email)) {
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+  } else {
+    try {
+      const [localPart, domainPart] = email.split("@");
+      const asciiDomain = toAscii(domainPart);
+      return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(`${localPart}@${asciiDomain}`);
+    } catch (e) {
+      return false;
+    }
+  }
+}
+
+router.post("/validate-email", (req, res) => {
+  const { email } = req.body;
+
+  if (!email) return res.status(400).json({ error: "Email is required" });
+
+  const isValid = validateEmail(email);
+
+  if (isValid) {
+    res.json({ valid: true, message: "Email is valid." });
+  } else {
+    res.status(400).json({ valid: false, error: "Invalid email address." });
+  }
+});
+
+router.post("/subscribe", async (req, res) => {
+  try {
+    const { email } = req.body;
+
+    if (!email || !validateEmail(email)) {
+      return res.status(400).json({ error: "Valid email is required" });
     }
 
-    // معالجة Punycode للدومين لو كان بالعربي
-    const [localPart, domainPart] = toEmail.split("@");
-    const encodedDomain = punycode.toASCII(domainPart);
-    const emailAddress = `${localPart}@${encodedDomain}`;
+    const [localPart, domainPart] = email.split("@");
+    const aLabelEmail = isAsciiEmail(email)
+      ? email
+      : `${localPart}@${toAscii(domainPart)}`;
 
-    // تجهيز الإيميل
-    const info = await transporter.sendMail({
-      from: `"فريق هاكاثون" <${punycode.toASCII("فريق١٠")}@${punycode.toASCII(
-        "هاكاثون.البحرين"
-      )}>`, // المرسل بصيغة Punycode
-      to: emailAddress, // المستقبل
-      subject: "أهلاً بك في هاكاثون البحرين!",
-      text: "شكرًا لتسجيلك معنا 🎉",
-      html: "<h1>شكرًا لتسجيلك معنا 🎉</h1><p>نتمنى لك التوفيق!</p>",
+    const newSubscription = new Subscription({
+      uLabelEmail: email,
+      aLabelEmail,
     });
 
-    console.log("Message sent: %s", info.messageId);
-    res.json({ output: "Email sent successfully" });
+    await newSubscription.save();
+
+    res.json({ message: "Subscribed successfully" });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post("/sendSubscribeEmail", async (req, res) => {
+  try {
+    const subscribers = await Subscription.find();
+
+    if (subscribers.length === 0)
+      return res.status(404).json({ error: "No subscribers found" });
+
+    for (const subscriber of subscribers) {
+      await transporter.sendMail({
+        from: `"فريق هاكاثون" <${punycode.toASCII("فريق١٠")}@${punycode.toASCII(
+          "هاكاثون.البحرين"
+        )}>`,
+        to: subscriber.aLabelEmail,
+        subject: "أهلاً بك في هاكاثون البحرين!",
+        text: "شكرًا لتسجيلك معنا 🎉",
+        html: "<h1>شكرًا لتسجيلك معنا 🎉</h1><p>نتمنى لك التوفيق!</p>",
+      });
+    }
+
+    res.json({ message: "Emails sent to all subscribers" });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: err.message });
