@@ -34,7 +34,7 @@ const Login = mongoose.model("Login", loginSchema);
 
 const userSchema = new mongoose.Schema({
   email: { type: String, required: true, unique: true },
-  fullname: { type: String },
+  fullname: { type: String, required: true },
   createdAt: { type: Date, default: Date.now },
 });
 
@@ -223,6 +223,41 @@ router.post("/sendSubscribeEmail", async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+router.post("/signup", async (req, res) => {
+  const { email, fullname } = req.body;
+
+  if (!email || !fullname) {
+    return res.status(400).json({ error: "Email and fullname are required." });
+  }
+
+  if (!validateEmail(email)) {
+    return res.status(400).json({ error: "Valid email is required" });
+  }
+
+  const existingUser = await User.findOne({ email });
+  if (existingUser) {
+    return res
+      .status(400)
+      .json({ error: "User already exists. Please log in." });
+  }
+
+  const code = Math.floor(100000 + Math.random() * 900000).toString();
+
+  await Login.create({ email, code });
+
+  await transporter.sendMail({
+    from: `"فريق هاكاثون" <${punycode.toASCII("فريق١٠")}@${punycode.toASCII(
+      "هاكاثون.البحرين"
+    )}>`,
+    to: email,
+    subject: "رمز التحقق لإنشاء حساب جديد",
+    text: `رمز التحقق الخاص بك هو: ${code}`,
+    html: `<h1>رمز التحقق لإنشاء حساب</h1><p>رمزك هو: <b>${code}</b></p>`,
+  });
+
+  res.json({ message: "Verification code sent for signup" });
+});
+
 router.post("/login", async (req, res) => {
   const { email } = req.body;
 
@@ -248,18 +283,25 @@ router.post("/login", async (req, res) => {
 });
 
 router.post("/verify-code", async (req, res) => {
-  const { email, code } = req.body;
+  const { email, code, fullname } = req.body;
 
   const validLogin = await Login.findOne({ email, code });
-
   if (!validLogin) {
-    return res.status(400).json({ error: "Invalid or expired code" });
+    return res
+      .status(400)
+      .json({ error: "Invalid or expired verification code" });
   }
 
   let user = await User.findOne({ email });
-  if (!user) {
-    user = new User({ email });
+
+  if (!user && fullname) {
+    // إذا كان التحقق ضمن تسجيل حساب جديد
+    user = new User({ email, fullname });
     await user.save();
+  } else if (!user) {
+    return res.status(400).json({
+      error: "User not found. Please sign up first.",
+    });
   }
 
   res.json({ message: "Logged in successfully" });
