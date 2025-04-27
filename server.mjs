@@ -3,7 +3,7 @@ import { OpenAI } from 'openai';
 import { config } from 'dotenv';
 import fetch from 'node-fetch'; // Important for embedding
 import fs from 'fs';
-import { readFile, writeFile, stat } from 'fs/promises';
+import { readFile, writeFile } from 'fs/promises';
 import path from 'path';
 import multer from 'multer';
 import cors from 'cors';
@@ -733,7 +733,9 @@ Answer:
 
 // --- Start server ---
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, async () => {
+app.listen(PORT, "0.0.0.0", async () => {
   await loadUAContent();
-  console.log(`Server running at http://localhost:${PORT}`);
+  console.log(
+    `Server running at http://${process.env.HOST || "localhost"}:${PORT}`
+  );
 });
