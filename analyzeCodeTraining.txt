@@ -1,0 +1,94 @@
+
+Universal Acceptance Readiness – Core Training Text
+
+1. What is Universal Acceptance (UA)?
+- Enabling use of Internationalized Domain Names (IDNs) and Email Address Internationalization (EAI).
+- Handling long TLDs (not assuming 2–3 letter domains only).
+- Accepting newly added TLDs (not hardcoding TLDs list).
+- Making systems accept non-ASCII domain names and email addresses.
+
+2. Categories of Applications
+- Web-Based Applications: UI in browsers (including embedded browsers).
+- Native Applications: Mobile/desktop apps directly on OS.
+
+3. Major Components
+- Browser
+- Frontend (HTML/CSS/JS)
+- Backend (server-side)
+- Database
+- Filesystem
+- External Services
+
+4. UA Gating Steps (Processing Pipeline)
+1. Accept user input (domain/email).
+2. Validate (syntax checking, normalization).
+3. Process on Input (prepare for saving).
+4. Store (correct storage in DB/files).
+5. Process on Output (prepare for displaying).
+6. Display (output user-friendly domain/email).
+
+5. Expected Behaviors (for UA Readiness)
+
+Step | Behavior
+--- | ---
+Accept | Accept Unicode characters for IDN/EAI.
+Validate | Normalize to NFC, verify correct IDN structure.
+Process Input | Do not truncate or change Unicode incorrectly.
+Store | Save UTF-8 correctly (for EAI and IDN).
+Process Output | Prepare properly without corrupting data.
+Display | Display Unicode correctly, allow fallback to A-label if needed.
+
+6. Testing Categories
+
+Test | Meaning
+--- | ---
+AT | Accept Test (can system accept UA input?)
+VT | Validate Test (is validation UA-compliant?)
+P1T | Process Input Test (no corruption during process?)
+ST | Store Test (stored correctly in DB?)
+P2T | Process Output Test (ready for output?)
+DT | Display Test (display correctly to user?)
+
+7. Important Special Points
+- Normalization should follow Unicode NFC form (Normalization Form C).
+- Test both U-Label and A-Label for IDNs.
+- Accept long and new TLDs without restriction.
+- EAI: Store UTF-8 encoded local parts in emails.
+- If using external services (Google login, Facebook login), verify they are UA ready too.
+
+
+
+Universal Acceptance Code Samples - Core Training Text
+
+1. Languages Covered:
+- Python (Linux Backend)
+- Java (Linux Backend)
+- JavaScript (Linux Backend)
+- PHP (Windows/Linux Backend)
+- Swift (iOS Mobile App)
+- Kotlin (Android Mobile App)
+
+2. Purpose:
+- Demonstrate best practices for Universal Acceptance (UA).
+- Correct handling of Email Address Internationalization (EAI).
+- Correct handling of Internationalized Domain Names (IDN) using IDNA2008 standard.
+
+3. Key Practices Highlighted:
+- Proper acceptance and validation of internationalized email addresses.
+- Proper acceptance and validation of internationalized domain names (IDNs).
+- Handling Unicode normalization (Normalization Form C - NFC).
+- Correct usage of U-labels (Unicode) and A-labels (Punycode) appropriately.
+- Allowing long and new TLDs without hardcoded restrictions.
+- Avoiding ASCII-only validation regex for emails and domains.
+- Using libraries that are IDNA2008-compliant.
+
+4. Important Test Runs:
+- 2021 Test Run: Focused on Swift (iOS), Kotlin (Android), PHP (Windows/Linux).
+- 2022 Test Run: Focused on Java, Python, and JavaScript showcasing library usage and protocol compliance.
+
+5. Best Practice Notes:
+- Always normalize domain names to Unicode NFC before validation or storage.
+- Accept Unicode characters in both local and domain parts of email addresses (for EAI).
+- Avoid assumptions about TLD length and domain format.
+- Validate email addresses and domains using Unicode-aware libraries and not ASCII regex only.
+- When using external authentication services (Google login, Facebook login), verify they accept UA inputs.
