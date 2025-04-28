@@ -153,6 +153,22 @@ async function detectLanguageName(text) {
   return langName;
 }
 
+function detectLanguageUsingRegex(text) {
+  const arabicRegex = /[\u0600-\u06FF]/g;
+  const englishRegex = /[a-zA-Z]/g;
+
+  const arabicMatches = text.match(arabicRegex) || [];
+  const englishMatches = text.match(englishRegex) || [];
+
+  if (arabicMatches.length > englishMatches.length) {
+    return "Arabic";
+  } else if (englishMatches.length > arabicMatches.length) {
+    return "English";
+  } else {
+    return "Arabic";
+  }
+}
+
 app.post("/ask", async (req, res) => {
   const { question, chatHistory = '' } = req.body;
   const chatHistoryString = `[${chatHistory
@@ -162,9 +178,9 @@ app.post("/ask", async (req, res) => {
 
   console.log("chatHistory", chatHistoryString);
   let userLanguage = 'Arabic'; // Default fallback language
-  detectLanguageName(question).then(lang => {
-    userLanguage = lang;
-  });
+  userLanguage = detectLanguageUsingRegex(question);
+
+  console.log("userLanguage", userLanguage);
   if (userLanguage !== 'English' && userLanguage !== 'Arabic') {
     userLanguage = 'English'; // Default to Arabic if not English or Arabic
   }
@@ -207,7 +223,7 @@ app.post("/ask", async (req, res) => {
 
     // Build the prompt
     //     You are a Universal Acceptance (UA) expert and you follow the latest IDN standard called IDNA2008 for Internationalized Domain Names (IDNs).
-    const prompt = `
+    let prompt = `
 Your name is GlobalLink.
 
 Respond in ${userLanguage}.
@@ -802,6 +818,8 @@ Answer:
 // chatWithPDF('./GPT_API.pdf', 'What is the main topic of this document?')
 //   .then(answer => console.log('Answer:', answer))
 //   .catch(err => console.error('Error:', err.message));
+
+
 
 
 
