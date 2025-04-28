@@ -348,7 +348,7 @@ function findRelevantChunks2(code) {
 // --- POST /analyze-text (analyze code sent as text) ---
 app.post("/analyze-text", async (req, res) => {
   const { code, language = "arabic" } = req.body; // default language is Arabic
-
+  console.log("Code:", code);
   if (!code) {
     return res.status(400).json({ error: "No code text provided." });
   }
