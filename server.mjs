@@ -249,6 +249,80 @@ Answer:
   }
 });
 
+
+app.post('/summarize-pdf', upload.single('file'), async (req, res) => {
+  const file = req.file;
+  const { summaryLength = 'medium', language = 'عربي' } = req.body;
+
+  if (!file) {
+    return res.status(400).json({ error: 'No file uploaded.' });
+  }
+
+  let text = '';
+
+  try {
+    const mimetype = file.mimetype;
+
+    if (mimetype === "application/pdf") {
+      text = await extractTextFromPDF(file.path);
+    } else if (
+      mimetype === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
+      mimetype === "application/msword"
+    ) {
+      const data = await fs.readFile(file.path);
+      const result = await mammoth.extractRawText({ buffer: data });
+      text = result.value;
+    } else if (mimetype === "text/plain") {
+      text = await fs.readFile(file.path, "utf8");
+    } else {
+      return res.status(400).json({ error: "Unsupported file type. Please upload PDF, DOC, DOCX, or TXT files." });
+    }
+
+    // Cleanup: remove uploaded file
+    // await fs.unlink(file.path);
+
+    if (!text || text.length < 30) {
+      return res.status(400).json({ error: "Extracted text is too short to summarize." });
+    }
+
+    // Build summarization prompt
+    let lengthInstruction = '';
+    if (summaryLength === 'short') {
+      lengthInstruction = 'Summarize the document in 1 paragraph.';
+    } else if (summaryLength === 'long') {
+      lengthInstruction = 'Summarize the document in around 5 paragraphs.';
+    } else {
+      lengthInstruction = 'Summarize the document in around 3 paragraphs.';
+    }
+
+    const prompt = `
+You are a summarization expert. Summarize the following document content in ${language}.
+
+${lengthInstruction}
+
+Here is the document content:
+${text}
+
+Summary:
+`;
+
+    // Send to OpenAI
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4o",
+      temperature: 0.3,
+      messages: [{ role: "user", content: prompt }],
+    });
+
+    const summary = completion.choices[0].message.content.trim();
+    res.json({ summary });
+
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Failed to process the file.' });
+  }
+});
+
+
 // --- File upload route ---
 // --- Helper: Analyze code block for UA issues ---
 async function analyzeCode(codeText) {
