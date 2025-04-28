@@ -39,7 +39,6 @@
     "nodemailer": "^6.10.1",
     "openai": "^4.96.0",
     "pdf-parse": "^1.1.1",
-    "pdf-poppler": "^0.2.1",
     "pdf2json": "^3.1.5",
     "punycode": "^2.3.1",
     "tesseract.js": "^6.0.1",
