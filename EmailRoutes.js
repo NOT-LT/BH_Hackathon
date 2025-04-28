@@ -172,8 +172,9 @@ router.post("/subscribe", async (req, res) => {
       uLabelEmail: email,
       aLabelEmail,
     });
-
-    await newSubscription.save();
+    if (!existingSubscription) {
+      await newSubscription.save();
+    }
 
     // Send welcome email in Arabic for new subscribers
     await transporter.sendMail({
