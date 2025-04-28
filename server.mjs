@@ -9,7 +9,7 @@ import multer from 'multer';
 import cors from 'cors';
 import EmailRoutes from "./EmailRoutes.js";
 import mammoth from 'mammoth';
-import pdfPoppler from 'pdf-poppler';
+// import pdfPoppler from 'pdf-poppler';
 import mime from 'mime-types'; // install it if needed: npm install mime-types
 import { createRequire } from 'module';
 import { Console } from 'console';
@@ -636,53 +636,53 @@ async function extractUploadedText(filePath, mimetype) {
   }
 }
 
-async function performOCR(filePath) {
-  console.log('Performing OCR on scanned PDF...');
+// async function performOCR(filePath) {
+//   console.log('Performing OCR on scanned PDF...');
 
-  // Step 1: Convert PDF to images
-  const outputDir = path.resolve('./temp_images');
-  if (!fs.existsSync(outputDir)) {
-    fs.mkdirSync(outputDir);
-  }
+//   // Step 1: Convert PDF to images
+//   const outputDir = path.resolve('./temp_images');
+//   if (!fs.existsSync(outputDir)) {
+//     fs.mkdirSync(outputDir);
+//   }
 
-  const options = {
-    format: 'jpeg', // Output format
-    out_dir: outputDir,
-    out_prefix: path.basename(filePath, path.extname(filePath)),
-    page: null, // Process all pages
-  };
+//   const options = {
+//     format: 'jpeg', // Output format
+//     out_dir: outputDir,
+//     out_prefix: path.basename(filePath, path.extname(filePath)),
+//     page: null, // Process all pages
+//   };
 
-  try {
-    console.log('Converting PDF to images...');
-    await pdfPoppler.convert(filePath, options);
-    console.log('PDF converted to images.');
+//   try {
+//     console.log('Converting PDF to images...');
+//     await pdfPoppler.convert(filePath, options);
+//     console.log('PDF converted to images.');
 
-    // Step 2: Perform OCR on each image
-    const imageFiles = fs.readdirSync(outputDir).filter(file => file.endsWith('.jpeg'));
-    let fullText = '';
+//     // Step 2: Perform OCR on each image
+//     const imageFiles = fs.readdirSync(outputDir).filter(file => file.endsWith('.jpeg'));
+//     let fullText = '';
 
-    for (const imageFile of imageFiles) {
-      const imagePath = path.join(outputDir, imageFile);
-      console.log(`Processing image: ${imagePath}`);
+//     for (const imageFile of imageFiles) {
+//       const imagePath = path.join(outputDir, imageFile);
+//       console.log(`Processing image: ${imagePath}`);
 
-      const { data: { text } } = await Tesseract.recognize(imagePath, 'eng+ara', {
-        langPath: path.resolve('./tessdata'), // Path to the local tessdata directory
-        logger: info => console.log(info), // Log OCR progress
-      });
+//       const { data: { text } } = await Tesseract.recognize(imagePath, 'eng+ara', {
+//         langPath: path.resolve('./tessdata'), // Path to the local tessdata directory
+//         logger: info => console.log(info), // Log OCR progress
+//       });
 
-      fullText += text + '\n';
-    }
+//       fullText += text + '\n';
+//     }
 
-    console.log('OCR extraction complete.');
-    return fullText.trim();
-  } catch (error) {
-    console.error('Error during OCR:', error.message);
-    throw new Error('Failed to extract text using OCR.');
-  } finally {
-    // Clean up temporary images
-    fs.rmSync(outputDir, { recursive: true, force: true }); // Updated to use fs.rmSync
-  }
-}
+//     console.log('OCR extraction complete.');
+//     return fullText.trim();
+//   } catch (error) {
+//     console.error('Error during OCR:', error.message);
+//     throw new Error('Failed to extract text using OCR.');
+//   } finally {
+//     // Clean up temporary images
+//     fs.rmSync(outputDir, { recursive: true, force: true }); // Updated to use fs.rmSync
+//   }
+// }
 
 
 async function extractTextFromPDF(filePath) {
